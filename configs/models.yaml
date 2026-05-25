@@ -1,0 +1,46 @@
+# models.yaml — Locked model choices for Phase 1
+# Last updated: Week 1 Day 5
+
+llm:
+  primary:
+    name: llama3.2:1b-instruct-q4_K_M
+    provider: ollama
+    context_window: 128000
+    ram_usage_mb: 1020
+    first_token_latency_s: 0.297
+    total_latency_s: 5.084
+  fallback:
+    name: tinyllama:1.1b
+    provider: ollama
+    context_window: 2048
+    first_token_latency_s: 0.116
+    total_latency_s: 5.981
+
+asr:
+  model: tiny.en
+  provider: faster-whisper
+  version: 1.2.1
+  device: cpu
+  compute_type: int8
+  avg_rtf: 0.062
+  expected_latency_ms: 800
+
+tts:
+  model: en_US-amy-medium
+  provider: piper
+  version: 1.4.2
+  model_path: models/piper/en_US-amy-medium.onnx
+  config_path: models/piper/en_US-amy-medium.onnx.json
+  sample_rate: 22050
+  avg_rtf: 0.067
+  expected_latency_ms: 250
+
+vad:
+  model: silero_vad_v4
+  version: v4
+  provider: onnxruntime
+  model_path: models/silero/silero_vad_v4.onnx
+  sample_rate: 16000
+  chunk_size: 512
+  silence_threshold: 0.5
+  expected_latency_ms: 200

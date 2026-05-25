@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Models (too large for GitHub)
+models/
+
+# Recordings
+recordings/
+
+# Env files
+.env
+
+# VS Code
+.vscode/
+
+# Logs
+*.log

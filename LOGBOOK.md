@@ -229,3 +229,51 @@ Day 3 hardcoded pipeline, then add live VAD-driven capture once Pi arrives.
 - `tests/test_asr.py`
 - `tests/test_tts.py`
 - `tests/test_vad.py`
+
+---
+
+### Day 2 - Unit Tests for ASR, TTS, VAD
+
+**Theme:** Write unit tests for all three core modules. WSL2 only, no live mic, no model downloads required for the default suite.
+
+#### Done
+- `tests/conftest.py` created - shared pytest infrastructure:
+  - `--run-integration` CLI flag registers the `integration` marker
+  - Auto-skips integration tests unless flag is passed
+  - Adds project root to `sys.path` so all test files can `from src import ...` cleanly
+  - Shared fixtures: `sine_chunk_16k`, `silence_chunk_16k`, `short_wav`, `stereo_wav_8k`
+- `tests/test_asr.py` written — 10 unit tests + 3 integration tests:
+  - Module constants, `load_model()` caching (`device=cpu`, `compute_type=int8`)
+  - `transcribe()` contract: keys, segment concatenation, beam_size/language params, latency, error propagation, empty transcript
+- `tests/test_tts.py` written - 15 unit tests + 2 integration tests:
+  - Module constants, `load_voice()` caching with correct model + config paths
+  - `synthesize()`: mono/16-bit wav, framerate from voice config, RTF math, output path, error propagation
+  - Critical regression test: wave params (`nchannels=1`, `sampwidth=2`, `framerate`) verified to be set **before** `synthesize_wav()` is called — guards against the Day 4 Piper bug
+- `tests/test_vad.py` written — 24 unit tests + 4 integration tests:
+  - Module constants including v4-only path check
+  - `load_model()`: `_h`/`_c` initialised as `(2,1,64)` zeros, session cached
+  - `reset_state()`: zeros both tensors unconditionally, does **not** trigger model load (by design)
+  - `get_speech_prob()`: shape, int16→float32 cast, `_h`/`_c` state update from session output
+  - `is_speech()`: threshold logic including `>=` edge case at exactly 0.5
+  - `test_on_file()`: 8kHz→16kHz resampling, stereo downmix, state reset per file, chunk count consistency
+  - Critical v5 regression test (integration): runs 20 random chunks and asserts max prob > 0.001 - catches accidental v5 load
+
+#### Design decision
+Two-layer test architecture across all modules:
+- **Unit tests** (default, ~0.4s): all external models mocked - fast, CI-friendly, no downloads
+- **Integration tests** (opt-in via `--run-integration`): load real models end-to-end
+
+#### Issues hit and fixed
+
+| Issue | Root cause | Fix |
+|---|---|---|
+| `patch("faster_whisper.WhisperModel")` not intercepting | `asr.py` binds `WhisperModel` at module top via `from faster_whisper import WhisperModel` — patching the library doesn't affect the already-bound name in `src.asr` | Added `_patch_whisper_model()` helper that introspects `src.asr` and patches the right binding |
+| Same for `patch("piper.PiperVoice")` | `tts.py` binds `PiperVoice` via `from piper.voice import PiperVoice` at module top | Added `_patch_piper_voice()` helper |
+| Same for `patch("onnxruntime.InferenceSession")` | `vad.py` uses `import onnxruntime as ort` at module top | Added `_patch_inference_session()` helper — handles all 3 import styles + lazy-import fallback |
+| `test_uses_cpu_provider` asserting `providers=["CPUExecutionProvider"]` | `vad.py` calls `ort.InferenceSession(MODEL_PATH)` with no `providers` kwarg — relies on onnxruntime default | Dropped `providers` assertion; test now only verifies model path |
+| `test_reset_state_loads_model_if_unloaded` failing | `reset_state()` intentionally only zeros `_h`/`_c` — it never calls `load_model()` | Replaced with `test_zeros_h_and_c_when_session_not_loaded` which tests what the function actually does |
+| `speech_ratio` precision mismatch | `vad.py` stores `round(speech_chunks/total_chunks, 3)` - 3dp; test used full float precision | Widened tolerance to `abs=1e-3` |
+
+#### Test Results (WSL2, Python 3.13.5)
+#### Carries to Day 3
+- `src/pipeline.py` — hardcoded 5s record → ASR → LLM → TTS → play

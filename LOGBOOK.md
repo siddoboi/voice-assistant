@@ -280,3 +280,41 @@ Two-layer test architecture across all modules:
 
 #### Carries to Day 3
 - `src/pipeline.py` — hardcoded 5s record → ASR → LLM → TTS → play
+
+---
+
+### Day 3 - pipeline.py (Hardcoded Chain)
+
+**Theme:** Wire all modules into a single end-to-end chain. No VAD, no streaming.
+
+#### Done
+- `src/pipeline.py` written with five stages:
+  - `_stage_record()` — live mic or `--input` pre-recorded wav (bypasses recording on WSL2)
+  - `_stage_asr()` - calls `asr.transcribe()`, applies fallback for empty transcript
+  - `_stage_llm()` - calls `llm_client.generate()`, applies fallback for empty reply
+  - `_stage_tts()` - calls `tts.synthesize()`, logs RTF
+  - `_stage_play()` - `load_wav` + `play` via `audio_io`; skipped by `--no-play`
+- CLI flags: `--duration`, `--input`, `--output`, `--no-play`, `--model`
+- `run()` returns structured dict with per-stage latencies - reusable by Day 5 VAD wrapper
+- `tests/test_pipeline.py` written - 20 unit tests + 1 integration test:
+  - Wiring, playback flag, model override, fallbacks, return contract, errors, CLI
+
+#### Live Run Results (WSL2, sample1.wav - 51s file)
+- rec=0.000s  asr=4.674s  llm=26.327s  tts=10.987s  play=0.000s
+- Total: 41.988s
+- TTS RTF: 0.073  |  TTS audio duration: 123.09s
+
+*WSL2 numbers not representative of Pi. LLM latency inflated because sample1.wav
+is 51s of dense speech - real utterances will be 3-5s. No system prompt yet.*
+
+#### Test Results (WSL2, Python 3.13.5)
+- 116 passed in 42.68s   (--run-integration)
+- 106 passed in 0.49s    (unit only)
+
+#### Notes
+- LLM receives raw transcript with no system prompt → verbose 400-word replies on long input. System prompt ("be a brief voice assistant") is a Week 3 task.
+- `--input recordings/sample1.wav --no-play` is the standard WSL2 smoke-test command until the Pi arrives.
+
+#### Carries to Day 4
+- Pi-dependent: ALSA setup, `pi_config.yaml`, USB audio adapter, live mic test
+- Blocked until Pi 5 arrives

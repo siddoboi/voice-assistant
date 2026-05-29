@@ -53,3 +53,8 @@ noise_reduction:
   stationary: false
   # 0.0 = no reduction, 1.0 = maximum. Lower if speech sounds distorted.
   prop_decrease: 1.0
+
+# Pipeline streaming (Week 3 Day 4). Bounds how far TTS synthesis may run
+# ahead of playback before back-pressure pauses it — caps memory on the Pi.
+pipeline:
+  tts_buffer_max_chunks: 3

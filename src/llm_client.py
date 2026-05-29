@@ -65,37 +65,16 @@ def _split_sentences(buffer: str) -> tuple[list[str], str]:
     return sentences, buffer[start:]
 
 
-def stream_sentences(prompt: str, model: str | None = None) -> Iterator[str]:
-    """Stream LLM output as complete sentences.
+def _sentences_from_tokens(token_iter):
+    """Core sentence-buffering loop shared by the streaming entry points.
 
-    Buffers raw tokens from stream_generate() and yields one complete
-    sentence each time a terminator (. ? !) is encountered. At end of
-    stream, any non-empty trailing buffer is flushed as a final sentence
-    (handles replies with no terminal punctuation).
-
-    Model convention: None uses stream_generate()'s PRIMARY_MODEL default;
-    an explicit model string is forwarded.
-
-    The generator return value (StopIteration.value) is a stats dict:
-        {
-            first_token_latency_s:    float | None,  # request → first token
-            time_to_first_sentence_s: float | None,  # first token → first sentence
-            total_latency_s:          float,
-            num_sentences:            int,
-        }
-    time_to_first_sentence_s maps to the 'First sentence assembled' line
-    in the Pi latency budget (800ms target).
+    Returns timing stats via StopIteration.value:
+        {first_token_latency_s, time_to_first_sentence_s, total_latency_s, num_sentences}
     """
-    token_iter = (
-        stream_generate(prompt)
-        if model is None
-        else stream_generate(prompt, model=model)
-    )
-
     buffer = ""
     t_start = time.time()
-    t_first_token: float | None = None
-    t_first_sentence: float | None = None
+    t_first_token = None
+    t_first_sentence = None
     num_sentences = 0
 
     for token in token_iter:
@@ -129,6 +108,35 @@ def stream_sentences(prompt: str, model: str | None = None) -> Iterator[str]:
         "total_latency_s": round(t_end - t_start, 3),
         "num_sentences": num_sentences,
     }
+
+
+def stream_sentences(prompt, model=None):
+    """Stream single-prompt LLM output as complete sentences."""
+    if model is None:
+        token_iter = stream_generate(prompt)
+    else:
+        token_iter = stream_generate(prompt, model=model)
+    return (yield from _sentences_from_tokens(token_iter))
+
+
+def stream_generate_messages(messages, model=PRIMARY_MODEL):
+    """Stream raw tokens from a full chat messages list (multi-turn)."""
+    stream = ollama.chat(model=model, messages=messages, stream=True)
+    for chunk in stream:
+        yield chunk["message"]["content"]
+
+
+def stream_sentences_from_messages(messages, model=None):
+    """Stream multi-turn LLM output as complete sentences.
+
+    Same buffering as stream_sentences but driven by a chat messages list
+    (system + history + latest user turn) from ConversationManager.
+    """
+    if model is None:
+        token_iter = stream_generate_messages(messages)
+    else:
+        token_iter = stream_generate_messages(messages, model=model)
+    return (yield from _sentences_from_tokens(token_iter))
 
 
 def measure_first_sentence_latency(

@@ -337,3 +337,42 @@ class TestRealStream:
         out = llm_client.generate("Say hello in one short sentence.")
         assert isinstance(out["text"], str) and out["text"].strip()
         assert isinstance(out["latency_s"], float) and out["latency_s"] > 0
+
+
+class TestStreamSentencesFromMessages:
+    def test_yields_sentences_from_messages(self):
+        fake = _token_stream(["Hello there. ", "How are you?"])
+        with patch.object(llm_client, "stream_generate_messages", fake):
+            out, _ = _drain(llm_client.stream_sentences_from_messages([{"role": "user", "content": "hi"}]))
+        assert out == ["Hello there.", "How are you?"]
+
+    def test_default_model_omits_model_kwarg(self):
+        mock = MagicMock(side_effect=lambda *a, **k: iter(["Hi."]))
+        msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+        with patch.object(llm_client, "stream_generate_messages", mock):
+            list(llm_client.stream_sentences_from_messages(msgs))
+        args, kwargs = mock.call_args
+        assert args == (msgs,)
+        assert "model" not in kwargs
+
+    def test_explicit_model_forwarded(self):
+        mock = MagicMock(side_effect=lambda *a, **k: iter(["Hi."]))
+        msgs = [{"role": "user", "content": "u"}]
+        with patch.object(llm_client, "stream_generate_messages", mock):
+            list(llm_client.stream_sentences_from_messages(msgs, model="tinyllama:1.1b"))
+        args, kwargs = mock.call_args
+        assert args == (msgs,)
+        assert kwargs.get("model") == "tinyllama:1.1b"
+
+    def test_stats_returned_via_stopiteration(self):
+        fake = _token_stream(["One. ", "Two."])
+        with patch.object(llm_client, "stream_generate_messages", fake):
+            _, stats = _drain(llm_client.stream_sentences_from_messages([{"role": "user", "content": "x"}]))
+        assert stats["num_sentences"] == 2
+        assert set(stats) == {"first_token_latency_s", "time_to_first_sentence_s", "total_latency_s", "num_sentences"}
+
+    def test_no_terminal_punctuation_flushed(self):
+        fake = _token_stream(["no period here"])
+        with patch.object(llm_client, "stream_generate_messages", fake):
+            out, _ = _drain(llm_client.stream_sentences_from_messages([{"role": "user", "content": "x"}]))
+        assert out == ["no period here"]

@@ -489,3 +489,127 @@ Files changed: `src/llm_client.py` (modified), `tests/test_llm_streaming.py` (ne
 - `conversation.end_session()` called on hangup
 - End-to-end latency measured on `sample1.wav`
 - `tests/test_pipeline.py` updated
+
+---
+
+### Day 4 - Streaming Pipeline Wiring
+
+**Theme:** Wire ConversationManager + streaming LLM + streaming TTS into one
+loop with bounded back-pressure. First audio now plays while the LLM is still
+generating later sentences.
+
+#### Done
+- `src/llm_client.py` refactored and extended:
+  - Extracted `_sentences_from_tokens(token_iter)` — the shared buffering core
+    (time.time/round, yields sentences, returns stats via StopIteration.value).
+    `stream_sentences` now delegates via `return (yield from ...)` — externally
+    identical, Day 2's 30 tests still pass unchanged.
+  - `stream_generate_messages(messages, model=PRIMARY_MODEL)` — passes a full
+    chat messages list straight to `ollama.chat(messages=...)`, enabling system
+    prompt + conversation history. Used by the pipeline instead of the flat
+    prompt path.
+  - `stream_sentences_from_messages(messages, model=None)` — same buffering as
+    `stream_sentences` but driven by a messages list from
+    `ConversationManager.build_messages()`. This is the pipeline's LLM entry
+    point for multi-turn.
+  - 5 new tests in `tests/test_llm_streaming.py` (`TestStreamSentencesFromMessages`):
+    sentence yield, default/override model forwarding, stats via StopIteration,
+    no-punctuation flush.
+
+- `src/pipeline.py` fully rewritten (streaming chain):
+  - `_sentences_from_tokens` core shared with llm_client (no duplication).
+  - `_recording_iter(sentence_iter, collected)` — tees the sentence stream: as
+    TTS pulls each sentence, it's appended to `collected`, giving the full reply
+    text for `add_assistant_turn()` without a second LLM pass.
+  - `_safe_next(gen, stats_holder)` — calls next(gen), captures StopIteration.value
+    as stats, returns sentinel on end — safe to call from run_in_executor.
+  - `_produce(queue, sentence_iter, sample_rate, tts_stats)` async coroutine —
+    drives `tts.synthesize_stream()` off-thread via `run_in_executor`; puts each
+    PCM chunk onto the bounded queue. Sentinel placed in `finally` so the
+    consumer always unblocks even if synthesis or LLM raises mid-stream
+    (deadlock prevention — discovered and fixed during sandbox testing).
+  - `_consume(queue, sample_rate, skip_play, t0, result)` async coroutine —
+    drains the queue, plays each chunk off-thread via `run_in_executor`, records
+    `first_audio_s` when the first chunk is dequeued. Runs concurrently with
+    `_produce` via `asyncio.create_task`.
+  - `_stream_and_play_async(sentence_iter, sample_rate, max_chunks, skip_play, t0)` —
+    creates `asyncio.Queue(maxsize=max_chunks)`, runs producer as a task,
+    awaits consumer, then awaits producer (re-raises any producer exception).
+  - `_stream_and_play(...)` — synchronous wrapper calling `asyncio.run(...)`.
+    Returns `(chunks, first_audio_s, tts_stats)`.
+  - `_max_chunks(config_path)` — reads `pipeline.tts_buffer_max_chunks` from
+    config (default 3); reuses `audio_io._get_config`. If value ≤ 0, returns 3.
+  - `run(...)` — new signature adds `conversation`, `session_id`, `config_path`.
+    Conversation lifecycle: if `conversation=None`, creates and ends its own
+    session (single-turn); if passed in, caller owns end_session (multi-turn
+    loop, called on hangup). `end_session` is in a `finally` so it fires on
+    errors. Output WAV is the concatenated PCM from all chunks, written at
+    `tts.output_sample_rate()`.
+  - New result dict keys: `session_id`, `num_sentences`, `num_audio_chunks`.
+  - New latency dict: `record_s`, `asr_s`, `first_audio_s` (stream-start →
+    first chunk played, the Week 3 headline metric), `stream_s`, `perceived_s`
+    (= asr_s + first_audio_s), `total_s` (= record + asr + stream). Old
+    `llm_s`/`tts_s`/`play_s` keys removed.
+
+- `configs/dev_config.yaml` extended — new `pipeline:` section:
+```yaml
+  pipeline:
+    tts_buffer_max_chunks: 3
+```
+
+- `tests/test_pipeline.py` fully rewritten — 36 tests (35 unit + 1 integration)
+  across 9 classes:
+  - `TestWiring` (8): input skips record, recording triggered, ASR path, user
+    turn added, LLM receives built messages, TTS stream invoked at voice rate,
+    assistant turn added with full joined reply, reply_text in result.
+  - `TestPlayback` (5): no-play skips, one play call per sentence, correct
+    sample rate, all chunks played under buffer=1 (back-pressure exercise),
+    reply WAV written.
+  - `TestModelOverride` (2): default omits model kwarg, explicit forwarded.
+  - `TestFallbacks` (3): empty transcript, whitespace transcript, empty reply.
+  - `TestConversationLifecycle` (4): own session created+ended, caller session
+    not touched, session_id in result, session_id forwarded to manager.
+  - `TestReturnValue` (5): keys, total = record+asr+stream, perceived =
+    asr+first_audio, skipped-record zero, first_audio non-negative.
+  - `TestMaxChunksConfig` (3): reads value, defaults to 3, non-positive → 3.
+  - `TestErrors` (3): missing input WAV, ASR error propagates, own session
+    ended even when LLM raises mid-stream (deadlock-guard).
+  - `TestCli` (2): missing input returns 2, model flag forwarded.
+  - `TestRealChain` (1 integration): real chain on sample1.wav, checks reply
+    WAV exists, latencies positive, prints perceived latency for Week 3 goal.
+
+#### Design Decisions
+- **Messages-based LLM streaming** (`stream_sentences_from_messages`) instead of
+  flattened prompt — preserves system prompt and multi-turn history as proper
+  role-tagged messages to `ollama.chat`. This is why `stream_sentences` was
+  refactored (shared buffering core) rather than duplicated.
+- **Sentinel in `finally`** on the producer — first sandbox run deadlocked when
+  a mid-stream LLM error killed the producer before it could signal end-of-stream.
+  `finally: await queue.put(_SENTINEL)` always unblocks the consumer; the
+  exception still surfaces via `await producer`. Pinned by
+  `test_own_session_ended_even_on_error`.
+- **`_recording_iter` tee** — sentence stream consumed by TTS but also recorded
+  for reply text assembly. Avoids a second LLM call for `add_assistant_turn`.
+- **Own vs borrowed conversation** — `run()` manages its own session for
+  single-turn latency runs; multi-turn main loop (Week 4) passes a shared
+  manager and calls `end_session()` on hangup.
+- **`asyncio.Queue(maxsize=3)`** per v3.1 Subtask 1 spec. Back-pressure: producer
+  pauses when 3 unplayed chunks queued, capping memory on the Pi.
+
+#### Issues
+- **Deadlock on producer exception** — discovered in first sandbox run. Fixed via
+  sentinel-in-finally pattern on `_produce`. See above.
+
+#### Test Results (WSL2, Python 3.13.5)
+- tests/test_pipeline.py:      35 passed, 1 skipped in 1.23s
+- tests/test_llm_streaming.py: 35 passed, 2 skipped in 0.34s
+- Full suite (pytest tests/):  241 passed, 15 skipped in 2.92s
+- Full suite (--run-integration): 256 passed in 23.49s
+
+Zero regressions.
+
+#### Carries to Day 5
+- Pi not arrived → `src/telephony/gsm_adapter.py` skeleton
+- SIM7600EI AT-command logic (`connect`, `disconnect`, `answer_call`, `hangup`,
+  `send_at`, `wait_for_ring`) with mocked pyserial unit tests
+- `tests/test_gsm_adapter.py`

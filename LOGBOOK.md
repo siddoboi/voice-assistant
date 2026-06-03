@@ -708,3 +708,80 @@ Full suite grew from 170 (Week 2 end) to 302 (Week 3 end).
 Pi arrival triggers Week 4: real latency measurement, VAD threshold tuning
 on GSM audio, mic gain optimisation, and wiring gsm_adapter into a real
 call loop.gir
+
+---
+
+## WEEK 4 - Pi Deployment & GSM Call Loop
+
+**Goal:** Pi hardware setup, live audio + GSM call testing, full call lifecycle,
+latency profiling on real hardware. WSL2 pre-Pi prep tasks completed first.
+
+**Status: 🔄 IN PROGRESS**
+**Pi 5 status: ⏳ Not yet arrived — Day 1 Pi tasks deferred. Pre-Pi prep done.**
+
+---
+
+### Pre-Pi Prep — WSL2-safe groundwork before Pi arrival
+
+**Theme:** Write all files that can be completed without the Pi so that
+Day 1 hardware setup involves filling in measured values, not writing code.
+Four files. No new tests. No new dependencies.
+
+#### Done
+
+- `configs/pi_config.yaml` written — full schema matching `dev_config.yaml`
+  exactly, with Pi-specific placeholders and comments for every deferred value:
+  - `audio.input_device: null` — fill with ALSA index from `aplay -l` on Pi
+  - `audio.output_device: null` — fill with ALSA index from `aplay -l` on Pi
+  - `audio.input_gain_percent: 75` — tune via amixer on Pi (Week 4 Day 1)
+  - `audio.sample_rate: 16000`, `channels: 1`, `dtype: int16` — same as dev
+  - `conversation:` section — identical to dev (persona and history window unchanged)
+  - `noise_reduction.enabled: false` — disabled on Pi until latency impact is measured
+  - `pipeline.tts_buffer_max_chunks: 3` — same as dev
+  - `telephony:` section — `port: /dev/ttyUSB2`, `baudrate: 115200`, `timeout_s: 2.0`, `ring_poll_timeout_s: 30.0`
+  - `vad.silence_threshold: 0.6` — Pi default for GSM noise floor (see Design Decisions)
+
+- `scripts/tune_vad_threshold.py` written — threshold sweep over a WAV file:
+  - `_load_mono_16k(wav_path)` — loads via `audio_io.load_wav()`, downmixes to mono, normalises int16 → float32, resamples to 16 kHz via `np.interp` (same convention as `vad.test_on_file()`)
+  - `_collect_speech_probs(audio)` — **single VAD pass**: calls `vad.reset_state()` once, then `vad.get_speech_prob()` per 512-sample chunk, stores per-chunk probability array. One model pass for all five thresholds; does not mutate module state.
+  - `_evaluate(probs, threshold)` → `{threshold, total_chunks, speech_chunks, silence_chunks, speech_ratio}` — evaluates stored probs with `>=` (matches `vad.is_speech()` semantics)
+  - `_bar(ratio, width)` — fixed-width ASCII bar for console readability
+  - `sweep(wav_path, output_path)` — runs all 5 thresholds, prints formatted table, saves JSON to `recordings/vad_threshold_results.json`
+  - `main()` / `_parse_args()` — argparse; positional `wav_path`, optional `--output`
+  - Scripts `chdir` to project root (resolved from `__file__`) — required because `vad.py` hardcodes a relative model path that breaks if CWD ≠ project root
+  - Thresholds swept: **0.5, 0.55, 0.6, 0.65, 0.7**
+
+- `scripts/benchmark_pi.py` written — full benchmark suite, formatted table + JSON:
+  - `benchmark_llm()` — `llm_client.measure_latency()` on both `PRIMARY_MODEL` and `FALLBACK_MODEL`
+  - `benchmark_asr(wav_path)` — `asr.transcribe()`; RTF = `latency_s / duration_s`
+  - `benchmark_tts()` — `tts.output_sample_rate()` then `tts.synthesize_stream()` over 5 standard sentences; RTF = `synth_time / audio_duration_s`; captures `time_to_first_audio_s` via `StopIteration.value`
+  - `benchmark_vad(wav_path)` — `vad.test_on_file()`; reports `speech_ratio`, `latency_s`, `threshold_used` (module default)
+  - `benchmark_e2e(wav_path)` — `pipeline.run(input_wav=..., skip_play=True)`; reports `perceived_s`, `asr_s`, `first_audio_s`, `stream_s`, `total_s`
+  - `print_table(report)` — aligned text table: LLM section + ASR/TTS/VAD section + E2E section
+  - `run_all(wav_path, output_path)` — calls all five, prints table, saves `recordings/pi_benchmarks.json`
+  - `main()` / `_parse_args()` — argparse; optional `--input` (default `recordings/sample1.wav`), optional `--output`
+  - Same `chdir`-to-project-root pattern as tune script
+
+- `README.md` written — complete project README:
+  - One-paragraph project description
+  - Hardware requirements list (Pi 5 kit, SIM7600EI HAT, USB audio adapter, TRRS earphones, SIM)
+  - Setup instructions (`git clone` + `bash setup.sh` + `source venv/bin/activate` + `ollama serve &`)
+  - Usage (`python -m src.pipeline --input recordings/sample1.wav`) + helper scripts
+  - Project structure tree (abridged)
+  - Architecture paragraph (streaming pipeline, asyncio.Queue back-pressure, perceived_s metric)
+  - Current status (Phase 1 in progress, Week 4 pending Pi)
+  - Tech stack bullet list
+
+#### Design Decisions
+
+- **`tune_vad_threshold.py` uses `get_speech_prob()` single-pass** — `vad.test_on_file()` cannot be reused for a sweep because it bakes in `SILENCE_THRESHOLD` via `is_speech()`. One pass collects raw probabilities; all five thresholds evaluated against the stored array. Avoids module-state mutation; 5× faster than five separate passes.
+- **`vad.silence_threshold: 0.6` in `pi_config.yaml` is currently inert** — `vad.py` reads `SILENCE_THRESHOLD = 0.5` as a module-level constant; it does not load any config file. Wiring `vad.py` to read from config is a **Week 4 code change**, not a YAML edit. The key documents intent and serves as the reference point for `tune_vad_threshold.py`.
+- **Scripts `chdir` to project root** — both scripts resolve `_PROJECT_ROOT` from `__file__` and call `os.chdir(_PROJECT_ROOT)`. Required because `vad.py`'s `MODEL_PATH` is relative — running from `scripts/` without chdir breaks model load.
+- **`noise_reduction.enabled: false` on Pi** — latency impact of noisereduce on ARM is unknown. Measure on Day 1 via benchmark suite, enable only if the 3.5s budget has room.
+- **`scripts/` is a new directory** — did not previously exist in the repo. Created during commit.
+
+#### Issues
+- None.
+
+#### Test Results
+No tests added or modified. Suite unchanged.

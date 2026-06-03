@@ -1,0 +1,89 @@
+# pi_config.yaml — Raspberry Pi 5 deployment configuration.
+#
+# Schema mirrors configs/dev_config.yaml exactly; only the values differ.
+# Activate this config on the Pi via the VOICE_ASSISTANT_CONFIG env var:
+#
+#     export VOICE_ASSISTANT_CONFIG=configs/pi_config.yaml
+#
+# or pass config_path=... explicitly to the audio_io / conversation loaders.
+#
+# Fields marked "fill on Pi" are placeholders — concrete values are
+# determined during Week 4 Day 1 hardware setup (ALSA enumeration, amixer
+# gain sweep, GSM VAD threshold tuning) and committed afterwards.
+audio:
+  # Sample rate for all in-pipeline audio (Hz). Same as dev.
+  sample_rate: 16000
+  # Telephony source sample rate (Hz). Used by resample_8_to_16k().
+  # SIM7600EI call audio arrives at 8 kHz; resampled up to 16 kHz for ASR.
+  telephony_sample_rate: 8000
+  # Single channel — all pipeline audio is mono.
+  channels: 1
+  # 16-bit PCM. sounddevice float32 used in-memory; .wav files written as int16.
+  dtype: int16
+  # Input device (USB audio adapter capture). null until ALSA index is known.
+  input_device: null      # fill with ALSA index from `aplay -l` / `arecord -l` on Pi
+  # Output device (USB audio adapter playback). null until ALSA index is known.
+  output_device: null     # fill with ALSA index from `aplay -l` on Pi
+  # Capture gain for the USB adapter, applied via amixer at startup.
+  input_gain_percent: 75  # tune via amixer on Pi — Week 4 Day 1
+  # Default recording duration when caller does not pass one.
+  default_record_duration_sec: 5.0
+
+paths:
+  # All recordings written here; gitignored.
+  recordings_dir: recordings
+
+# Conversation manager configuration. Identical to dev_config.yaml — the
+# assistant persona and history window do not change between environments.
+conversation:
+  # System prompt prepended to every LLM call. Kept terse to minimise tokens
+  # and keep responses short — critical for the 3.5s perceived-latency target.
+  system_prompt: >-
+    You are a helpful voice assistant answering a live phone call.
+    Keep replies short and conversational — one or two sentences.
+    Speak naturally as if on the phone. Do not use markdown, bullet points,
+    or code. If asked something you cannot answer, say so briefly.
+  # Rolling window: max number of (user, assistant) turn PAIRS retained
+  # in-memory and sent to the LLM. 6 pairs ≈ 12 messages — comfortably within
+  # both Llama 3.2 1B (128K) and TinyLlama (2K) context windows.
+  max_history_turns: 6
+  # SQLite database file for session persistence. Parent dir auto-created.
+  db_path: recordings/conversations.db
+
+# Noise reduction. Starts DISABLED on the Pi: measure the per-turn latency
+# impact of noisereduce on ARM before enabling. If the 3.5s budget has room,
+# flip enabled: true and re-benchmark. (Week 4 Day 1 measurement task.)
+noise_reduction:
+  enabled: false
+  # stationary=false adapts to changing noise (better for varied GSM audio);
+  # true is cheaper but assumes constant background noise.
+  stationary: false
+  # 0.0 = no reduction, 1.0 = maximum. Lower if speech sounds distorted.
+  prop_decrease: 1.0
+
+# Pipeline streaming. Bounds how far TTS synthesis may run ahead of playback
+# before back-pressure pauses it — caps memory on the 4 GB Pi. Same as dev.
+pipeline:
+  tts_buffer_max_chunks: 3
+
+# SIM7600EI 4G LTE HAT serial interface (AT commands via pyserial).
+telephony:
+  port: /dev/ttyUSB2          # SIM7600 AT interface; confirm with `ls /dev/ttyUSB*` on Pi
+  baudrate: 115200
+  timeout_s: 2.0
+  ring_poll_timeout_s: 30.0
+
+# VAD threshold override for the GSM noise floor.
+#
+# NOTE: this key is not yet read by src/vad.py — that module currently uses
+# the module-level constant SILENCE_THRESHOLD (0.5). This value documents the
+# intended Pi default and is consumed by scripts/tune_vad_threshold.py as a
+# reference point. Wiring vad.py to read vad.silence_threshold from config is
+# a Week 4 code change. Until then, changing this number alone does NOT move
+# the runtime threshold.
+vad:
+  # Higher than the WSL2 default of 0.5: GSM call audio has a higher noise
+  # floor, so a clean-WAV threshold over-triggers on line hiss. Expect the
+  # tuned value to land around 0.6–0.65 after running tune_vad_threshold.py
+  # on real SIM7600EI audio (Week 4 Day 1).
+  silence_threshold: 0.6

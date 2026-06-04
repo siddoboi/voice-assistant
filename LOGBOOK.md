@@ -780,3 +780,9 @@ Four files. No new tests. No new dependencies.
 - **Scripts `chdir` to project root** — both scripts resolve `_PROJECT_ROOT` from `__file__` and call `os.chdir(_PROJECT_ROOT)`. Required because `vad.py`'s `MODEL_PATH` is relative — running from `scripts/` without chdir breaks model load.
 - **`noise_reduction.enabled: false` on Pi** — latency impact of noisereduce on ARM is unknown. Measure on Day 1 via benchmark suite, enable only if the 3.5s budget has room.
 - **`scripts/` is a new directory** — did not previously exist in the repo. Created during commit.
+
+#### Issues
+- None.
+
+#### Test Results
+No tests added or modified. Suite unchanged.

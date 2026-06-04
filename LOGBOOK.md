@@ -711,3 +711,13 @@ on GSM audio, mic gain optimisation, and wiring gsm_adapter into a real
 call loop.gir
 
 ---
+
+## WEEK 4 - Pi Deployment & GSM Call Loop
+
+**Goal:** Pi hardware setup, live audio + GSM call testing, full call lifecycle,
+latency profiling on real hardware. WSL2 pre-Pi prep tasks completed first.
+
+**Status: 🔄 IN PROGRESS**
+**Pi 5 status: ⏳ Not yet arrived — Day 1 Pi tasks deferred. Pre-Pi prep done.**
+
+---

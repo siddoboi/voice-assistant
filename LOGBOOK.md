@@ -690,3 +690,13 @@ validation deferred to Week 4 Day 1 when the Pi arrives.
 - **FakeSerial harness** — `readline()` returns `b""` on exhaustion (real
   pyserial timeout behaviour), so deadline-loop logic is exercised
   realistically without hardware.
+
+#### Test Results (WSL2, Python 3.13.5)
+tests/test_gsm_adapter.py:  46 passed in 0.58s
+Full suite (pytest tests/): 287 passed, 15 skipped in 5.44s
+Full suite (--run-integration): 302 passed in 31.41s
+
+Zero regressions.
+
+#### Issues
+- None.

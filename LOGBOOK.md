@@ -621,3 +621,33 @@ Zero regressions.
 **Theme:** SIM7600EI AT-command skeleton, fully unit-tested with mocked
 pyserial. Call audio path out of scope — signalling only. Real-hardware
 validation deferred to Week 4 Day 1 when the Pi arrives.
+
+#### Done
+- `src/telephony/gsm_adapter.py` written from scratch — `GSMAdapter` class:
+  - Config-driven (`telephony:` section in dev_config.yaml; falls back to
+    defaults silently so the skeleton works without config).
+  - Self-contained config loader — does not import audio_io, keeping telephony
+    decoupled from the audio stack.
+  - `connect()` — opens serial port, sends `AT` (link check), `ATE0` (echo
+    off), `AT+CLIP=1` (caller ID). Raises `GSMConnectionError` if port
+    unavailable or module silent.
+  - `disconnect()` — closes port. Idempotent.
+  - `send_at(command, timeout)` — core I/O: writes `command\r\n`, reads lines
+    until final result code, returns intermediate lines on `OK`, raises on
+    `ERROR`/`BUSY`/`+CME ERROR`/etc., raises `GSMTimeout` if no final code
+    arrives. Skips command echo. Resets input buffer before each write.
+  - `check_sim()` / `check_signal()` / `check_registration()` /
+    `is_call_active()` — status queries parsing `+CPIN`, `+CSQ`, `+CREG`,
+    `+CLCC`.
+  - `answer_call()` — `ATA`.
+  - `hangup()` — `AT+CHUP` (clears all calls; more reliable than ATH on
+    SIM7600).
+  - `dial(number)` — `ATD<number>;` (semicolon = voice call, not data).
+  - `wait_for_ring(timeout)` — blocks reading lines for unsolicited `RING`,
+    capturing caller number from preceding `+CLIP:`. Returns
+    `{"event": "RING", "caller": <num|None>}` or `None` on timeout.
+  - Context manager (`__enter__`/`__exit__`) — connect on enter, disconnect
+    on exit even on exception.
+  - Exception hierarchy: `GSMError` (base) → `GSMConnectionError`,
+    `GSMTimeout`, `GSMCommandError`.
+  - Module-level parsers: `_parse_csq`, `_parse_creg`, `_parse_clip`.

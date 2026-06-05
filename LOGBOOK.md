@@ -729,3 +729,15 @@ Four files. No new tests. No new dependencies.
 
 #### Done
 
+- `configs/pi_config.yaml` written — full schema matching `dev_config.yaml`
+  exactly, with Pi-specific placeholders and comments for every deferred value:
+  - `audio.input_device: null` — fill with ALSA index from `aplay -l` on Pi
+  - `audio.output_device: null` — fill with ALSA index from `aplay -l` on Pi
+  - `audio.input_gain_percent: 75` — tune via amixer on Pi (Week 4 Day 1)
+  - `audio.sample_rate: 16000`, `channels: 1`, `dtype: int16` — same as dev
+  - `conversation:` section — identical to dev (persona and history window unchanged)
+  - `noise_reduction.enabled: false` — disabled on Pi until latency impact is measured
+  - `pipeline.tts_buffer_max_chunks: 3` — same as dev
+  - `telephony:` section — `port: /dev/ttyUSB2`, `baudrate: 115200`, `timeout_s: 2.0`, `ring_poll_timeout_s: 30.0`
+  - `vad.silence_threshold: 0.6` — Pi default for GSM noise floor (see Design Decisions)
+

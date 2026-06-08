@@ -39,3 +39,16 @@ On the Pi, activate the Pi configuration before running:
 export VOICE_ASSISTANT_CONFIG=configs/pi_config.yaml
 ```
 
+## Usage
+
+Run the pipeline against a pre-recorded WAV file:
+
+```bash
+python -m src.pipeline --input recordings/sample1.wav
+```
+
+Useful flags: `--no-play` (skip audio playback, e.g. for headless
+benchmarking), `--output <path>` (save the synthesized reply WAV),
+`--model <name>` (override the LLM), and `--session-id <id>` (resume a stored
+conversation).
+

@@ -52,3 +52,37 @@ benchmarking), `--output <path>` (save the synthesized reply WAV),
 `--model <name>` (override the LLM), and `--session-id <id>` (resume a stored
 conversation).
 
+Helper scripts:
+
+```bash
+python scripts/tune_vad_threshold.py recordings/sample1.wav   # VAD threshold sweep
+python scripts/benchmark_pi.py --input recordings/sample1.wav # full benchmark suite
+```
+
+## Project Structure
+
+```
+voice-assistant/
+├── src/
+│   ├── audio_io.py        # record/play/resample/WAV I/O + noise reduction
+│   ├── asr.py             # faster-whisper transcription
+│   ├── llm_client.py      # Ollama LLM client + sentence streaming
+│   ├── tts.py             # Piper TTS batch + streaming synthesis
+│   ├── vad.py             # Silero VAD v4 voice activity detection
+│   ├── conversation.py    # multi-turn history + SQLite session persistence
+│   ├── pipeline.py        # streaming record→ASR→LLM→TTS→play orchestration
+│   ├── main.py            # VAD-driven call loop (in progress; needs Pi)
+│   └── telephony/
+│       └── gsm_adapter.py # SIM7600EI AT-command call control
+├── configs/
+│   ├── dev_config.yaml    # WSL2 development settings
+│   ├── pi_config.yaml     # Raspberry Pi deployment settings
+│   └── models.yaml        # model paths and benchmark metrics
+├── scripts/
+│   ├── tune_vad_threshold.py
+│   └── benchmark_pi.py
+├── tests/                 # pytest unit + opt-in integration suite
+├── recordings/            # WAV samples + SQLite DB (gitignored)
+└── setup.sh
+```
+

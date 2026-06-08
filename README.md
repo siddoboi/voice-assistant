@@ -110,3 +110,19 @@ full call lifecycle, on-Pi VAD/mic tuning) begins when the Pi 5 hardware
 arrives. Weeks 5–6 cover WER and latency evaluation, stability testing, and
 packaging as a systemd service.
 
+## Tech Stack
+
+- **Language:** Python 3.13
+- **LLM:** Ollama — Llama 3.2 1B Instruct (Q4_K_M) primary, TinyLlama 1.1B fallback
+- **ASR:** faster-whisper (tiny.en, int8, CPU)
+- **TTS:** Piper TTS (en_US-amy-medium)
+- **VAD:** Silero VAD v4 via ONNX Runtime
+- **Noise reduction:** noisereduce (lazy-imported, config-toggleable)
+- **Telephony:** SIM7600EI 4G LTE HAT driven by pyserial AT commands
+- **Audio I/O:** sounddevice (PortAudio)
+- **Concurrency:** asyncio (bounded-queue streaming)
+- **Config:** PyYAML
+- **Persistence:** SQLite (stdlib)
+- **Testing:** pytest
+- **Process supervision:** systemd
+- **Dev OS:** WSL2 Debian Trixie · **Deploy OS:** Raspberry Pi OS 64-bit

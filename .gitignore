@@ -20,3 +20,7 @@ recordings/
 
 # Logs
 *.log
+
+# Nested sibling repos - tracked separately, do not commit here
+voice-assistant-ubuntu/
+voice-assistant-multilingual/
